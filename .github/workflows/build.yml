@@ -2,7 +2,7 @@ name: Build Dr.Clicker APK
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, 'arena/**' ]
   workflow_dispatch:
 
 jobs:
@@ -39,12 +39,27 @@ jobs:
       - name: Build debug APK
         run: flutter build apk --debug
 
-      - name: Upload APK
+      - name: Build release APK
+        run: flutter build apk --release
+
+      - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: DrClicker-v24.1-debug
+          name: DrClicker-v1.0.0-debug
           path: build/app/outputs/flutter-apk/app-debug.apk
           retention-days: 30
 
+      - name: Upload release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: DrClicker-v1.0.0-release
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 30
+
       - name: Show APK info
-        run: ls -lh build/app/outputs/flutter-apk/
+        run: |
+          echo "📦 Built APKs:"
+          ls -lh build/app/outputs/flutter-apk/
+          echo ""
+          echo "✅ Debug APK: $(du -h build/app/outputs/flutter-apk/app-debug.apk | cut -f1)"
+          echo "✅ Release APK: $(du -h build/app/outputs/flutter-apk/app-release.apk | cut -f1)"
