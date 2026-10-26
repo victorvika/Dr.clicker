@@ -235,12 +235,12 @@ class FloatingPanelService : Service() {
         val engineOn = MyAccessibilityService.isEngineOn
         val count = prefs.getInt("accept_count", 0)
         val flPrefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE)
-        val minP = flPrefs.getInt("min_price", 0)
-        val maxP = flPrefs.getInt("max_price", 0)
-        val priceOn = flPrefs.getBoolean("price_filter_on", false)
-        val distOn = flPrefs.getBoolean("dist_filter_on", false)
-        val voiceOn = flPrefs.getBoolean("voice_on", true)
-        val clickSpeed = flPrefs.getFloat("click_speed_ms", 50f).toInt()
+        val minP = flPrefs.getInt("flutter.min_price", 0)
+        val maxP = flPrefs.getInt("flutter.max_price", 0)
+        val priceOn = flPrefs.getBoolean("flutter.price_filter_on", false)
+        val distOn = flPrefs.getBoolean("flutter.dist_filter_on", false)
+        val voiceOn = flPrefs.getBoolean("flutter.voice_on", true)
+        val clickSpeed = flPrefs.getFloat("flutter.click_speed_ms", 50f).toInt()
 
         tvStatus?.text = if (engineOn) "Engine: ON 🟢 • ${clickSpeed}ms" else "Engine: OFF 🔴"
         tvStatus?.setTextColor(if (engineOn) Color.parseColor("#00E676") else Color.parseColor("#EF5350"))

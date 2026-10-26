@@ -135,7 +135,9 @@ class MyAccessibilityService : AccessibilityService(), TextToSpeech.OnInitListen
     }
 
     private fun getVoiceLang(): String {
-        return flutterPrefs.getString("voice_lang", "en") ?: "en"
+        return try {
+            flutterPrefs.getString("flutter.voice_lang", "en") ?: "en"
+        } catch (_: Exception) { "en" }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -214,23 +216,31 @@ class MyAccessibilityService : AccessibilityService(), TextToSpeech.OnInitListen
 
     /** Read click speed from Flutter prefs — defaults to 50ms */
     private fun getClickSpeed(): Long {
-        val speed = flutterPrefs.getFloat("click_speed_ms", 50f)
-        return speed.toLong().coerceIn(10L, 500L)
+        return try {
+            val speed = flutterPrefs.getFloat("flutter.click_speed_ms", 50f)
+            speed.toLong().coerceIn(10L, 500L)
+        } catch (_: Exception) { 50L }
     }
 
     /** Check if voice announcement is enabled */
     private fun isVoiceOn(): Boolean {
-        return flutterPrefs.getBoolean("voice_on", true)
+        return try {
+            flutterPrefs.getBoolean("flutter.voice_on", true)
+        } catch (_: Exception) { true }
     }
 
     /** Check if price filter is enabled */
     private fun isPriceFilterOn(): Boolean {
-        return flutterPrefs.getBoolean("price_filter_on", false)
+        return try {
+            flutterPrefs.getBoolean("flutter.price_filter_on", false)
+        } catch (_: Exception) { false }
     }
 
     /** Check if distance filter is enabled */
     private fun isDistFilterOn(): Boolean {
-        return flutterPrefs.getBoolean("dist_filter_on", false)
+        return try {
+            flutterPrefs.getBoolean("flutter.dist_filter_on", false)
+        } catch (_: Exception) { false }
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -242,16 +252,13 @@ class MyAccessibilityService : AccessibilityService(), TextToSpeech.OnInitListen
             val saved = meClickerPrefs.getString("ride_history", null)
             if (saved != null && saved.isNotEmpty()) {
                 val arr = JSONArray(saved)
-                rideHistory.put(arr)
-                // rideHistory is a JSONArray, we need to merge
-                // Actually let's just replace
                 synchronized(rideHistory) {
-                    // Clear and repopulate
                     while (rideHistory.length() > 0) rideHistory.remove(0)
                     for (i in 0 until arr.length()) {
                         rideHistory.put(arr.get(i))
                     }
                 }
+                log("📋 Loaded ${arr.length()} rides from history")
             }
         } catch (e: Exception) {
             log("⚠️ Failed to load history: ${e.message}")

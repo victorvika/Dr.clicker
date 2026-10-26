@@ -132,18 +132,16 @@ class MainActivity : FlutterActivity() {
                             .edit()
                             .remove("ride_history")
                             .apply()
-                        // Also clear in-memory history
-                        val service = MyAccessibilityService()
-                        try { service.clearHistory() } catch (_: Exception) {}
                         result.success(null)
                     }
 
                     // ── NEW: Test voice announcement ──
                     "testVoice" -> {
                         val lang = call.argument<String>("lang") ?: "en"
-                        // We can't call the service directly from here safely,
-                        // so we use TTS directly for test
-                        val tts = android.speech.tts.TextToSpeech(this,
+                        result.success(null)
+                        // Use late-init pattern to avoid self-reference
+                        val ttsHolder = arrayOf<android.speech.tts.TextToSpeech?>(null)
+                        ttsHolder[0] = android.speech.tts.TextToSpeech(this,
                             android.speech.tts.TextToSpeech.OnInitListener { status ->
                                 if (status == android.speech.tts.TextToSpeech.SUCCESS) {
                                     val locale = when (lang) {
@@ -153,8 +151,8 @@ class MainActivity : FlutterActivity() {
                                         "hi" -> Locale("hi", "IN")
                                         else -> Locale.ENGLISH
                                     }
-                                    tts?.setLanguage(locale)
-                                    tts?.setSpeechRate(1.1f)
+                                    ttsHolder[0]?.setLanguage(locale)
+                                    ttsHolder[0]?.setSpeechRate(1.1f)
                                     val message = when (lang) {
                                         "ta" -> "Vanakkam! Dr.Clicker voice test. Ride accept aayiduchu. Price 150 rupees."
                                         "hi" -> "Namaste! Dr.Clicker voice test. Ride accept ho gayi. Price 150 rupaye."
@@ -162,15 +160,13 @@ class MainActivity : FlutterActivity() {
                                         "kn" -> "Namaskara! Dr.Clicker voice test. Ride accept aaytu. Price 150 rupayigalu."
                                         else -> "Hello! Dr.Clicker voice test. Ride accepted. Price 150 rupees."
                                     }
-                                    tts?.speak(message, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "test")
-                                    // Shutdown after speaking
+                                    ttsHolder[0]?.speak(message, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "test")
                                     android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                                        tts?.stop()
-                                        tts?.shutdown()
+                                        ttsHolder[0]?.stop()
+                                        ttsHolder[0]?.shutdown()
                                     }, 5000L)
                                 }
                             })
-                        result.success(null)
                     }
 
                     "getLogPath" -> {
