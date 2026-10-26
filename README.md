@@ -1,7 +1,7 @@
-# ⚡ Dr.Clicker — Auto Accept for Rapido & Ola Drivers
+# ⚡ Dr.Clicker v2.0 — Auto Accept for Rapido & Ola Drivers
 
 **Package:** `com.dr.clicker.atikapp`  
-**Version:** 1.0.0  
+**Version:** 2.0.0  
 **100% Free · No Firebase · No Login · No Ads · Fully Offline**
 
 ---
@@ -10,12 +10,15 @@
 
 Dr.Clicker automatically taps the **Accept** button on **Rapido Captain** and **Ola Driver** the instant a ride request appears. It uses Android's Accessibility Service to read the screen and dispatch a tap gesture — no screenshots, no image recognition, no internet.
 
-### Features
-- ⚡ **Instant Auto-Accept** — 10–100ms human-like delay for natural behavior
-- 🌍 **7 Language Support** — English, Tamil, Telugu, Kannada, Hindi, Marathi, Bengali
+### 🆕 v2.0 Features
+- ⚡ **Custom Click Speed** — Adjustable tap delay from 10ms to 500ms with presets (Ultra/Fast/Normal/Slow)
+- 🔘 **Filter ON/OFF Toggles** — Enable/disable Price and Distance filters independently
+- 🔊 **Voice Announcement** — Announces price, distance & drop location on ride accept (5 languages: English, Tamil, Telugu, Kannada, Hindi)
+- 📋 **Order History** — View all accepted rides with summary stats, filters & clear option
+- 🌍 **7 Language Accept Detection** — English, Tamil, Telugu, Kannada, Hindi, Marathi, Bengali
 - 💰 **Price Filter** — Accept only rides within your price range
 - 📍 **Distance Filter** — Filter by pickup & drop distance
-- 🟢 **Floating Panel** — Live status overlay on top of Rapido/Ola
+- 🟢 **Floating Panel** — Live status overlay showing click speed, voice & filter status
 - 🔋 **Battery Optimization** — Keeps engine alive in background
 - 🔄 **Boot Auto-Start** — Engine restarts when phone turns on
 - 📊 **Stats Tracking** — Rides accepted count & click speed
@@ -24,7 +27,7 @@ Dr.Clicker automatically taps the **Accept** button on **Rapido Captain** and **
 
 ## 📥 Download APK
 
-Go to **Actions** tab → Click latest build → Download APK from Artifacts section.
+**Latest Build (v2.0.0):** Go to [Actions → Latest Run](https://github.com/victorvika/Dr.clicker/actions) → Scroll to **Artifacts** → Download `DrClicker-v2.0.0-release`
 
 Or build locally:
 ```bash
