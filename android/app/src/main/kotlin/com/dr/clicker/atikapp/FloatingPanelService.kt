@@ -170,7 +170,7 @@ class FloatingPanelService : Service() {
             }
             val dotBg = android.graphics.drawable.GradientDrawable().apply {
                 shape = android.graphics.drawable.GradientDrawable.OVAL
-                setColor(Color.parseColor("#00E676"))
+                setColor(Color.parseColor("#66BB6A"))
             }
             background = dotBg
         }
@@ -178,7 +178,7 @@ class FloatingPanelService : Service() {
 
         val title = TextView(ctx).apply {
             text = "⚡ Dr.Clicker"
-            setTextColor(Color.parseColor("#FFD600"))
+            setTextColor(Color.parseColor("#66BB6A"))
             textSize = 11f
             setTypeface(null, android.graphics.Typeface.BOLD)
         }
@@ -195,7 +195,7 @@ class FloatingPanelService : Service() {
 
         tvCount = TextView(ctx).apply {
             text = "Rides: 0"
-            setTextColor(Color.parseColor("#00E676"))
+            setTextColor(Color.parseColor("#66BB6A"))
             textSize = 10f
             setTypeface(null, android.graphics.Typeface.BOLD)
             setPadding(0, (2*dp).toInt(), 0, 0)
@@ -217,8 +217,8 @@ class FloatingPanelService : Service() {
         return android.graphics.drawable.GradientDrawable().apply {
             shape = android.graphics.drawable.GradientDrawable.RECTANGLE
             cornerRadius = 14f * dp
-            setColor(Color.parseColor("#DD111111"))
-            setStroke((1.5f * dp).toInt(), Color.parseColor("#66FFD600"))
+            setColor(Color.parseColor("#DD0F1A0F"))
+            setStroke((1.5f * dp).toInt(), Color.parseColor("#661E3A1E"))
         }
     }
 
@@ -243,7 +243,7 @@ class FloatingPanelService : Service() {
         val clickSpeed = flPrefs.getFloat("flutter.click_speed_ms", 50f).toInt()
 
         tvStatus?.text = if (engineOn) "Engine: ON 🟢 • ${clickSpeed}ms" else "Engine: OFF 🔴"
-        tvStatus?.setTextColor(if (engineOn) Color.parseColor("#00E676") else Color.parseColor("#EF5350"))
+        tvStatus?.setTextColor(if (engineOn) Color.parseColor("#66BB6A") else Color.parseColor("#EF5350"))
         tvCount?.text = "Rides: $count ${if (voiceOn) "🔊" else "🔇"}"
         tvFilter?.text = when {
             priceOn && distOn -> when {

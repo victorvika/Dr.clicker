@@ -34,8 +34,8 @@ import java.util.regex.Pattern
 import kotlin.random.Random
 
 /**
- * Dr.Clicker Accessibility Engine v2.0
- * Features: Custom click speed, voice announcement, ride history
+ * Dr.Clicker Accessibility Engine v2.1
+ * Features: Anti-bot detection, blocklist, click speed, voice, history
  */
 class MyAccessibilityService : AccessibilityService(), TextToSpeech.OnInitListener {
 
@@ -49,38 +49,32 @@ class MyAccessibilityService : AccessibilityService(), TextToSpeech.OnInitListen
 
         val ACCEPT_KEYWORDS = listOf(
             "accept", "confirm", "match", "take ride", "start ride",
-            "ஏற்க",
-            "స్వీకరించు",
-            "ಸ್ವೀಕರಿಸಿ",
-            "स्वीकार करें",
-            "स्वीकार",
-            "स्वीकार करा",
-            "গ্রহণ করুন"
+            "ஏற்க", "స్వీకరించు", "ಸ್ವೀಕರಿಸಿ",
+            "स्वीकार करें", "स्वीकार", "स्वीकार करा", "গ্রহণ করুন"
         )
 
         private val NUMBER_RE = Pattern.compile("^[0-9]+\\.?[0-9]*$")
         private val STRIP_NON_NUM = Pattern.compile("[^0-9.]")
 
-        @Volatile
-        var isEngineOn = false
+        @Volatile var isEngineOn = false
             private set
 
-        // History stored in memory + synced to prefs
         val rideHistory = JSONArray()
+
+        // ── ANTI-BOT: Track recent click patterns to avoid detection ──
+        private val recentClickTimes = mutableListOf<Long>()
+        private var lastIdleUntil = 0L
+        private var clickCountSinceIdle = 0
     }
 
     private lateinit var flutterPrefs: SharedPreferences
     private lateinit var meClickerPrefs: SharedPreferences
-
     private var logFile: File? = null
     private var isForegroundRunning = false
     private var wakeLock: PowerManager.WakeLock? = null
     private var lastEventMs = 0L
-
     private val seenNodes = LinkedHashSet<String>()
     private val handler = Handler(Looper.getMainLooper())
-
-    // TextToSpeech
     private var tts: TextToSpeech? = null
     private var ttsReady = false
 
@@ -99,148 +93,167 @@ class MyAccessibilityService : AccessibilityService(), TextToSpeech.OnInitListen
             notificationTimeout = 0L
         }
         setServiceInfo(info)
-
         flutterPrefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE)
         meClickerPrefs = getSharedPreferences("MeClickerPrefs", MODE_PRIVATE)
         logFile = File(getExternalFilesDir(null), "god_mode_logs.txt")
-
-        // Initialize TTS
         tts = TextToSpeech(this, this)
-
-        // Load saved history
         loadHistory()
-
         acquireWakeLock()
-        log("🚀 Dr.Clicker v2.0 ONLINE | Click Speed + Voice + History")
+        log("🚀 Dr.Clicker v2.1 | Anti-Bot + Blocklist + Voice + History")
     }
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
             ttsReady = true
-            val lang = getVoiceLang()
-            val locale = when (lang) {
-                "ta" -> Locale("ta", "IN")
-                "te" -> Locale("te", "IN")
-                "kn" -> Locale("kn", "IN")
-                "hi" -> Locale("hi", "IN")
-                else -> Locale.ENGLISH
-            }
-            val result = tts?.setLanguage(locale)
-            if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                tts?.setLanguage(Locale.ENGLISH)
-            }
+            val locale = langToLocale(getVoiceLang())
+            tts?.setLanguage(locale)
             tts?.setSpeechRate(1.1f)
-            log("🔊 TTS initialized with locale: $locale")
         }
     }
 
-    private fun getVoiceLang(): String {
-        return try {
-            flutterPrefs.getString("flutter.voice_lang", "en") ?: "en"
-        } catch (_: Exception) { "en" }
-    }
-
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        log("🚀 Service onStartCommand called")
-        if (getBoolPref("master_switch") || getBoolPref("flutter.masterSwitch")) {
-            if (!isForegroundRunning) {
-                startForegroundService()
-                isForegroundRunning = true
-            }
+        if (getBoolPref("master_switch")) {
+            if (!isForegroundRunning) { startForegroundService(); isForegroundRunning = true }
             acquireWakeLock()
         }
         return START_STICKY
     }
 
-    override fun onInterrupt() {
-        isEngineOn = false
-    }
+    override fun onInterrupt() { isEngineOn = false }
 
     override fun onDestroy() {
         isEngineOn = false
         releaseWakeLock()
-        tts?.stop()
-        tts?.shutdown()
-        val masterOn = getBoolPref("master_switch") || getBoolPref("flutter.masterSwitch")
-        if (masterOn) {
-            log("🔄 Service destroyed, trying to restart...")
-            val restartIntent = Intent(this, MyAccessibilityService::class.java)
+        tts?.stop(); tts?.shutdown()
+        if (getBoolPref("master_switch")) {
             try {
-                if (Build.VERSION.SDK_INT >= 26) {
-                    startForegroundService(restartIntent)
-                } else {
-                    startService(restartIntent)
-                }
+                if (Build.VERSION.SDK_INT >= 26)
+                    startForegroundService(Intent(this, MyAccessibilityService::class.java))
+                else startService(Intent(this, MyAccessibilityService::class.java))
             } catch (_: Exception) {}
         }
         super.onDestroy()
     }
 
     // ────────────────────────────────────────────────────────────────
-    // PREFS
+    // PREFS HELPERS
     // ────────────────────────────────────────────────────────────────
 
-    private fun getBoolPref(key: String): Boolean {
-        val flutterKey = key.replace("flutter.", "")
-        if (flutterPrefs.contains(flutterKey)) {
-            return flutterPrefs.getBoolean(flutterKey, false)
-        }
-        if (meClickerPrefs.contains(key)) {
-            return meClickerPrefs.getBoolean(key, false)
-        }
-        return false
+    private fun getBoolPref(key: String): Boolean = try {
+        flutterPrefs.getBoolean("flutter.$key", false)
+    } catch (_: Exception) { false }
+
+    private fun getIntPref(key: String): Int = try {
+        flutterPrefs.getInt("flutter.$key", 0)
+    } catch (_: Exception) { 0 }
+
+    private fun getFloatPref(key: String): Float = try {
+        flutterPrefs.getFloat("flutter.$key", 0f)
+    } catch (_: Exception) { 0f }
+
+    private fun getClickSpeed(): Long = try {
+        flutterPrefs.getFloat("flutter.click_speed_ms", 50f).toLong().coerceIn(10L, 500L)
+    } catch (_: Exception) { 50L }
+
+    private fun isVoiceOn(): Boolean = try {
+        flutterPrefs.getBoolean("flutter.voice_on", true)
+    } catch (_: Exception) { true }
+
+    private fun isPriceFilterOn(): Boolean = try {
+        flutterPrefs.getBoolean("flutter.price_filter_on", false)
+    } catch (_: Exception) { false }
+
+    private fun isDistFilterOn(): Boolean = try {
+        flutterPrefs.getBoolean("flutter.dist_filter_on", false)
+    } catch (_: Exception) { false }
+
+    private fun getVoiceLang(): String = try {
+        flutterPrefs.getString("flutter.voice_lang", "en") ?: "en"
+    } catch (_: Exception) { "en" }
+
+    /** Get blocklist as list of lowercase strings */
+    private fun getBlocklist(): List<String> = try {
+        val raw = flutterPrefs.getString("flutter.blocklist", "") ?: ""
+        if (raw.isEmpty()) emptyList()
+        else raw.split("|||").filter { it.isNotBlank() }.map { it.trim().lowercase(Locale.ROOT) }
+    } catch (_: Exception) { emptyList() }
+
+    private fun langToLocale(lang: String): Locale = when (lang) {
+        "ta" -> Locale("ta", "IN")
+        "te" -> Locale("te", "IN")
+        "kn" -> Locale("kn", "IN")
+        "hi" -> Locale("hi", "IN")
+        else -> Locale.ENGLISH
     }
 
-    private fun getIntPref(key: String): Int {
-        val flutterKey = key.replace("flutter.", "")
-        if (flutterPrefs.contains(flutterKey)) {
-            return flutterPrefs.getInt(flutterKey, 0)
+    // ────────────────────────────────────────────────────────────────
+    // ANTI-BOT DETECTION ENGINE
+    // ────────────────────────────────────────────────────────────────
+
+    /**
+     * Human-like click delay with anti-bot randomization.
+     * - Base delay from user settings
+     * - Gaussian jitter (not uniform — looks more human)
+     * - Occasional micro-pauses to simulate human hesitation
+     * - Periodic "idle" breaks every 5-12 clicks
+     */
+    private fun getHumanDelay(): Long {
+        val base = getClickSpeed()
+        val now = System.currentTimeMillis()
+
+        // Anti-bot: periodic idle breaks (simulate human looking at screen)
+        if (now < lastIdleUntil) {
+            val remaining = lastIdleUntil - now
+            log("🤖 Anti-bot: idle break ${remaining}ms remaining")
+            return remaining + base
         }
-        if (meClickerPrefs.contains(key)) {
-            return try {
-                meClickerPrefs.getInt(key, 0)
-            } catch (_: Exception) {
-                meClickerPrefs.getLong(key, 0L).toInt()
+
+        clickCountSinceIdle++
+
+        // Every 5-12 clicks, take a 0.5-3 second break
+        val idleThreshold = Random.nextInt(5, 13)
+        if (clickCountSinceIdle >= idleThreshold) {
+            clickCountSinceIdle = 0
+            val idleMs = Random.nextLong(500L, 3000L)
+            lastIdleUntil = now + idleMs
+            log("🤖 Anti-bot: scheduling ${idleMs}ms idle break")
+            return idleMs + base
+        }
+
+        // Gaussian jitter — more natural than uniform random
+        val jitter = (Random.nextGaussian() * base * 0.25).toLong()
+        val microHesitation = if (Random.nextInt(100) < 15) Random.nextLong(50L, 200L) else 0L
+
+        return (base + jitter + microHesitation).coerceAtLeast(10L)
+    }
+
+    /**
+     * Human-like tap with randomized position offset and gesture duration.
+     * Bots always tap exact center — humans don't.
+     */
+    private fun humanTap(x: Float, y: Float) {
+        // Random offset within 8px radius (simulates finger imprecision)
+        val offsetX = x + Random.nextFloat() * 16f - 8f
+        val offsetY = y + Random.nextFloat() * 16f - 8f
+
+        // Variable gesture duration: 30-80ms (humans vary press duration)
+        val duration = Random.nextLong(30L, 80L)
+
+        // Slight curved path (not perfectly straight)
+        val path = Path().apply {
+            moveTo(offsetX, offsetY)
+            val dx = Random.nextFloat() * 3f - 1.5f
+            val dy = Random.nextFloat() * 3f - 1.5f
+            lineTo(offsetX + dx, offsetY + dy)
+        }
+
+        val stroke = GestureDescription.StrokeDescription(path, 0L, duration)
+        val gesture = GestureDescription.Builder().addStroke(stroke).build()
+        dispatchGesture(gesture, object : GestureResultCallback() {
+            override fun onCancelled(gesture: GestureDescription) {
+                Log.w(TAG, "Gesture cancelled at ($offsetX,$offsetY)")
             }
-        }
-        return 0
-    }
-
-    private fun getFloatPref(key: String): Float {
-        val flutterKey = key.replace("flutter.", "")
-        if (flutterPrefs.contains(flutterKey)) {
-            return flutterPrefs.getFloat(flutterKey, 0f)
-        }
-        return 0f
-    }
-
-    /** Read click speed from Flutter prefs — defaults to 50ms */
-    private fun getClickSpeed(): Long {
-        return try {
-            val speed = flutterPrefs.getFloat("flutter.click_speed_ms", 50f)
-            speed.toLong().coerceIn(10L, 500L)
-        } catch (_: Exception) { 50L }
-    }
-
-    /** Check if voice announcement is enabled */
-    private fun isVoiceOn(): Boolean {
-        return try {
-            flutterPrefs.getBoolean("flutter.voice_on", true)
-        } catch (_: Exception) { true }
-    }
-
-    /** Check if price filter is enabled */
-    private fun isPriceFilterOn(): Boolean {
-        return try {
-            flutterPrefs.getBoolean("flutter.price_filter_on", false)
-        } catch (_: Exception) { false }
-    }
-
-    /** Check if distance filter is enabled */
-    private fun isDistFilterOn(): Boolean {
-        return try {
-            flutterPrefs.getBoolean("flutter.dist_filter_on", false)
-        } catch (_: Exception) { false }
+        }, handler)
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -250,64 +263,45 @@ class MyAccessibilityService : AccessibilityService(), TextToSpeech.OnInitListen
     private fun loadHistory() {
         try {
             val saved = meClickerPrefs.getString("ride_history", null)
-            if (saved != null && saved.isNotEmpty()) {
+            if (!saved.isNullOrEmpty()) {
                 val arr = JSONArray(saved)
                 synchronized(rideHistory) {
                     while (rideHistory.length() > 0) rideHistory.remove(0)
-                    for (i in 0 until arr.length()) {
-                        rideHistory.put(arr.get(i))
-                    }
+                    for (i in 0 until arr.length()) rideHistory.put(arr.get(i))
                 }
-                log("📋 Loaded ${arr.length()} rides from history")
             }
-        } catch (e: Exception) {
-            log("⚠️ Failed to load history: ${e.message}")
-        }
+        } catch (_: Exception) {}
     }
 
     private fun saveHistory() {
         try {
-            meClickerPrefs.edit()
-                .putString("ride_history", rideHistory.toString())
-                .apply()
-        } catch (e: Exception) {
-            log("⚠️ Failed to save history: ${e.message}")
-        }
+            meClickerPrefs.edit().putString("ride_history", rideHistory.toString()).apply()
+        } catch (_: Exception) {}
     }
 
     private fun addRideToHistory(app: String, price: Double, pickup: Double, drop: Double,
-                                  latencyMs: Long, tapX: Int, tapY: Int) {
+                                  latencyMs: Long, tapX: Int, tapY: Int, blocked: Boolean = false) {
         val entry = JSONObject().apply {
             put("app", app)
             put("price", if (price > 0) price.toInt().toString() else "?")
             put("pickup", if (pickup > 0) String.format("%.1f", pickup) else "?")
             put("drop", if (drop > 0) String.format("%.1f", drop) else "?")
             put("latency", latencyMs)
-            put("tapX", tapX)
-            put("tapY", tapY)
+            put("tapX", tapX); put("tapY", tapY)
             put("time", SimpleDateFormat("dd MMM yyyy, HH:mm:ss", Locale.getDefault()).format(Date()))
             put("timestamp", System.currentTimeMillis())
+            put("blocked", blocked)
         }
-
         synchronized(rideHistory) {
             rideHistory.put(entry)
-            // Keep only last MAX_HISTORY entries
-            while (rideHistory.length() > MAX_HISTORY) {
-                rideHistory.remove(0)
-            }
+            while (rideHistory.length() > MAX_HISTORY) rideHistory.remove(0)
         }
         saveHistory()
     }
 
     fun clearHistory() {
-        synchronized(rideHistory) {
-            while (rideHistory.length() > 0) rideHistory.remove(0)
-        }
+        synchronized(rideHistory) { while (rideHistory.length() > 0) rideHistory.remove(0) }
         saveHistory()
-    }
-
-    fun getHistoryJson(): String {
-        return rideHistory.toString()
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -315,17 +309,11 @@ class MyAccessibilityService : AccessibilityService(), TextToSpeech.OnInitListen
     // ────────────────────────────────────────────────────────────────
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        val masterOn = getBoolPref("master_switch") || getBoolPref("flutter.masterSwitch")
+        val masterOn = getBoolPref("master_switch")
         isEngineOn = masterOn
 
-        if (masterOn && !isForegroundRunning) {
-            startForegroundService()
-            isForegroundRunning = true
-        } else if (!masterOn && isForegroundRunning) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            isForegroundRunning = false
-            return
-        }
+        if (masterOn && !isForegroundRunning) { startForegroundService(); isForegroundRunning = true }
+        else if (!masterOn && isForegroundRunning) { stopForeground(STOP_FOREGROUND_REMOVE); isForegroundRunning = false; return }
         if (!masterOn) return
 
         val now = System.currentTimeMillis()
@@ -333,32 +321,18 @@ class MyAccessibilityService : AccessibilityService(), TextToSpeech.OnInitListen
         lastEventMs = now
 
         val allWindows = try { windows } catch (_: Exception) { null } ?: return
-
         for (win in allWindows) {
             val root = win.root ?: continue
             val type = win.type
+            if (type == AccessibilityWindowInfo.TYPE_INPUT_METHOD) { recycleNode(root); continue }
 
-            if (type == AccessibilityWindowInfo.TYPE_INPUT_METHOD) {
-                recycleNode(root)
-                continue
-            }
-
-            val pkg = try {
-                root.packageName?.toString()?.lowercase(Locale.ROOT) ?: ""
-            } catch (_: Exception) { "" }
-
-            val isRapido = pkg.contains("rapido") || pkg.contains("captain")
-            val isOla = pkg.contains("ola") && pkg.contains("driver")
-            val isUber = pkg.contains("uber") && pkg.contains("driver")
-            val isNamma = pkg.contains("namma") || pkg.contains("yatri")
-            val isPopup = type == AccessibilityWindowInfo.TYPE_SYSTEM
-
+            val pkg = try { root.packageName?.toString()?.lowercase(Locale.ROOT) ?: "" } catch (_: Exception) { "" }
             val tag = when {
-                isOla -> "Ola"
-                isUber -> "Uber"
-                isNamma -> "Namma"
-                isRapido -> "Rapido"
-                isPopup -> "Popup"
+                pkg.contains("ola") && pkg.contains("driver") -> "Ola"
+                pkg.contains("uber") && pkg.contains("driver") -> "Uber"
+                pkg.contains("rapido") || pkg.contains("captain") -> "Rapido"
+                pkg.contains("namma") || pkg.contains("yatri") -> "Namma"
+                type == AccessibilityWindowInfo.TYPE_SYSTEM -> "Popup"
                 else -> pkg.take(20)
             }
             scanAndClick(root, now, tag)
@@ -367,71 +341,69 @@ class MyAccessibilityService : AccessibilityService(), TextToSpeech.OnInitListen
     }
 
     // ────────────────────────────────────────────────────────────────
-    // SCANNER — Respects filter ON/OFF toggles
+    // SCANNER — Blocklist + Filters
     // ────────────────────────────────────────────────────────────────
 
     private fun scanAndClick(root: AccessibilityNodeInfo, ts: Long, tag: String) {
-        // Read filter toggles
         val priceFilterOn = isPriceFilterOn()
-        val distFilterOn  = isDistFilterOn()
+        val distFilterOn = isDistFilterOn()
+        val blocklist = getBlocklist()
 
-        // Read filter values (only used when respective toggle is ON)
-        val minPrice  = if (priceFilterOn) getIntPref("min_price") else 0
-        val maxPrice  = if (priceFilterOn) getIntPref("max_price").let { if (it == 0) 99999 else it } else 99999
+        val minPrice = if (priceFilterOn) getIntPref("min_price") else 0
+        val maxPrice = if (priceFilterOn) getIntPref("max_price").let { if (it == 0) 99999 else it } else 99999
         val minPickup = if (distFilterOn) getFloatPref("min_pickup") else 0f
-        val maxDrop   = if (distFilterOn) getFloatPref("max_drop").let { if (it == 0f) 999f else it } else 999f
+        val maxDrop = if (distFilterOn) getFloatPref("max_drop").let { if (it == 0f) 999f else it } else 999f
 
-        // Collect visible numbers
+        // Collect ALL visible text for blocklist checking
+        val allTexts = mutableListOf<String>()
         val numbers = mutableListOf<Double>()
-        collectText(root) { txt ->
-            val n = toNumber(txt)
-            if (n > 0) numbers.add(n)
+        collectTextAndNumbers(root, allTexts, numbers)
+
+        // ── BLOCKLIST CHECK ──
+        if (blocklist.isNotEmpty()) {
+            val allTextJoined = allTexts.joinToString(" ").lowercase(Locale.ROOT)
+            val matchedBlock = blocklist.find { blocked -> allTextJoined.contains(blocked) }
+            if (matchedBlock != null) {
+                log("[$tag] 🚫 BLOCKED — '$matchedBlock' found in screen text")
+                // Save as blocked ride in history
+                val price = numbers.find { it in 10.0..9999.0 } ?: -1.0
+                val pickup = numbers.find { it in 0.1..50.0 } ?: -1.0
+                val drop = numbers.find { it in 0.1..200.0 && it != price } ?: -1.0
+                addRideToHistory(tag, price, pickup, drop, 0, 0, 0, blocked = true)
+                if (isVoiceOn()) {
+                    announceBlocked(tag, matchedBlock)
+                }
+                return
+            }
         }
 
-        var price  = numbers.find { it in 10.0..9999.0 } ?: -1.0
+        var price = numbers.find { it in 10.0..9999.0 } ?: -1.0
         var pickup = numbers.find { it in 0.1..50.0 } ?: -1.0
-        var drop   = numbers.find { it in 0.1..200.0 && it != price } ?: -1.0
+        var drop = numbers.find { it in 0.1..200.0 && it != price } ?: -1.0
 
-        // FILTER CHECKS — only when filter is ON
         if (priceFilterOn) {
-            if (minPrice > 0 && price > 0 && price < minPrice) {
-                log("[$tag] ✗ Price ₹${price.toInt()} < min ₹$minPrice")
-                return
-            }
-            if (maxPrice > 0 && price > 0 && price > maxPrice) {
-                log("[$tag] ✗ Price ₹${price.toInt()} > max ₹$maxPrice")
-                return
-            }
+            if (minPrice > 0 && price > 0 && price < minPrice) { log("[$tag] ✗ Price ₹${price.toInt()} < min ₹$minPrice"); return }
+            if (maxPrice > 0 && price > 0 && price > maxPrice) { log("[$tag] ✗ Price ₹${price.toInt()} > max ₹$maxPrice"); return }
         }
         if (distFilterOn) {
-            if (minPickup > 0 && pickup > 0 && pickup < minPickup) {
-                log("[$tag] ✗ Pickup ${pickup}km < min ${minPickup}km")
-                return
-            }
-            if (maxDrop > 0 && drop > 0 && drop > maxDrop) {
-                log("[$tag] ✗ Drop ${drop}km > max ${maxDrop}km")
-                return
-            }
+            if (minPickup > 0 && pickup > 0 && pickup < minPickup) { log("[$tag] ✗ Pickup ${pickup}km < min"); return }
+            if (maxDrop > 0 && drop > 0 && drop > maxDrop) { log("[$tag] ✗ Drop ${drop}km > max"); return }
         }
 
         clickAccept(root, ts, tag, price, pickup, drop)
     }
 
     // ────────────────────────────────────────────────────────────────
-    // CLICKER — Uses custom click speed
+    // CLICKER — Anti-bot humanized clicks
     // ────────────────────────────────────────────────────────────────
 
-    private fun clickAccept(
-        node: AccessibilityNodeInfo, ts: Long, tag: String,
-        price: Double, pickup: Double, drop: Double
-    ) {
+    private fun clickAccept(node: AccessibilityNodeInfo, ts: Long, tag: String,
+                             price: Double, pickup: Double, drop: Double) {
         val text = try { node.text?.toString()?.trim() ?: "" } catch (_: Exception) { "" }
         val desc = try { node.contentDescription?.toString()?.trim() ?: "" } catch (_: Exception) { "" }
         val combined = "$text $desc".lowercase(Locale.ROOT)
 
-        if (ACCEPT_KEYWORDS.any { keyword ->
-            combined.contains(keyword.lowercase(Locale.ROOT))
-        }) {
+        if (ACCEPT_KEYWORDS.any { kw -> combined.contains(kw.lowercase(Locale.ROOT)) }) {
             val key = "${node.hashCode()}_$ts"
             if (key in seenNodes) return
             seenNodes.add(key)
@@ -443,14 +415,8 @@ class MyAccessibilityService : AccessibilityService(), TextToSpeech.OnInitListen
             val bounds = Rect()
             node.getBoundsInScreen(bounds)
 
-            // Use custom click speed from settings
-            val baseDelay = getClickSpeed()
-            val jitter = Random.nextLong(0L, (baseDelay * 0.2).toLong().coerceAtLeast(5L))
-            val delay = baseDelay + jitter
-
-            val priceStr = if (price > 0) "₹${price.toInt()}" else "₹?"
-            val pickupStr = if (pickup > 0) "${pickup}km pickup" else ""
-            val dropStr = if (drop > 0) "${drop}km drop" else ""
+            // Anti-bot: humanized delay
+            val delay = getHumanDelay()
 
             val startMs = System.currentTimeMillis()
 
@@ -458,7 +424,8 @@ class MyAccessibilityService : AccessibilityService(), TextToSpeech.OnInitListen
                 val cx = bounds.centerX().toFloat()
                 val cy = bounds.centerY().toFloat()
                 handler.postDelayed({
-                    tap(cx, cy)
+                    // Anti-bot: humanized tap position
+                    humanTap(cx, cy)
                     val latency = System.currentTimeMillis() - startMs
                     onAccepted(tag, price, pickup, drop, latency, cx.toInt(), cy.toInt())
                 }, delay)
@@ -483,213 +450,115 @@ class MyAccessibilityService : AccessibilityService(), TextToSpeech.OnInitListen
     private fun onAccepted(tag: String, price: Double, pickup: Double, drop: Double,
                             latencyMs: Long, tapX: Int, tapY: Int) {
         val count = meClickerPrefs.getInt("accept_count", 0) + 1
-        meClickerPrefs.edit()
-            .putInt("accept_count", count)
-            .putLong("last_latency_ms", latencyMs)
-            .apply()
-
-        val priceStr = if (price > 0) "₹${price.toInt()}" else "₹?"
-        val pickupStr = if (pickup > 0) "${pickup}km pickup" else ""
-        val dropStr = if (drop > 0) "${drop}km drop" else ""
-
-        log("[$tag] ✅ ACCEPTED $priceStr $pickupStr $dropStr latency=${latencyMs}ms total=$count")
-
-        // Add to history
+        meClickerPrefs.edit().putInt("accept_count", count).putLong("last_latency_ms", latencyMs).apply()
+        log("[$tag] ✅ ACCEPTED ₹${if (price > 0) price.toInt() else "?"} latency=${latencyMs}ms total=$count")
         addRideToHistory(tag, price, pickup, drop, latencyMs, tapX, tapY)
-
-        // Beep
         beep()
-
-        // Voice announcement
-        if (isVoiceOn()) {
-            announceRide(tag, price, pickup, drop)
-        }
+        if (isVoiceOn()) announceRide(tag, price, pickup, drop)
     }
 
     // ────────────────────────────────────────────────────────────────
-    // VOICE ANNOUNCEMENT
+    // VOICE
     // ────────────────────────────────────────────────────────────────
 
     private fun announceRide(tag: String, price: Double, pickup: Double, drop: Double) {
         if (!ttsReady) return
-
         val lang = getVoiceLang()
-        val message = when (lang) {
+        val msg = buildVoiceMessage(tag, price, pickup, drop, lang, false)
+        handler.postDelayed({
+            try {
+                tts?.setLanguage(langToLocale(lang))
+                tts?.speak(msg, TextToSpeech.QUEUE_ADD, null, "ride_${System.currentTimeMillis()}")
+            } catch (_: Exception) {}
+        }, 200L)
+    }
+
+    private fun announceBlocked(tag: String, location: String) {
+        if (!ttsReady) return
+        val lang = getVoiceLang()
+        val msg = when (lang) {
+            "ta" -> "$tag ride block aayiduchu. Location $location."
+            "hi" -> "$tag ride block ho gayi. Location $location."
+            "te" -> "$tag ride block ayindi. Location $location."
+            "kn" -> "$tag ride block aaytu. Location $location."
+            else -> "$tag ride blocked. Location $location."
+        }
+        handler.postDelayed({
+            try {
+                tts?.setLanguage(langToLocale(lang))
+                tts?.speak(msg, TextToSpeech.QUEUE_ADD, null, "block_${System.currentTimeMillis()}")
+            } catch (_: Exception) {}
+        }, 100L)
+    }
+
+    fun testVoice(lang: String) {
+        if (!ttsReady) return
+        val msg = buildVoiceMessage("Test", 150.0, 2.0, 5.0, lang, true)
+        try {
+            tts?.setLanguage(langToLocale(lang))
+            tts?.speak(msg, TextToSpeech.QUEUE_FLUSH, null, "test_voice")
+        } catch (_: Exception) {}
+    }
+
+    private fun buildVoiceMessage(tag: String, price: Double, pickup: Double, drop: Double,
+                                   lang: String, isTest: Boolean): String {
+        val parts = mutableListOf<String>()
+        when (lang) {
             "ta" -> {
-                val parts = mutableListOf<String>()
-                parts.add("$tag ride accept aayiduchu")
+                parts.add(if (isTest) "Vanakkam! Dr.Clicker voice test" else "$tag ride accept aayiduchu")
                 if (price > 0) parts.add("Price ${price.toInt()} rupees")
                 if (pickup > 0) parts.add("Pickup ${String.format("%.1f", pickup)} kilometre")
                 if (drop > 0) parts.add("Drop ${String.format("%.1f", drop)} kilometre")
-                parts.joinToString(", ")
             }
             "hi" -> {
-                val parts = mutableListOf<String>()
-                parts.add("$tag ride accept ho gayi")
+                parts.add(if (isTest) "Namaste! Dr.Clicker voice test" else "$tag ride accept ho gayi")
                 if (price > 0) parts.add("Price ${price.toInt()} rupaye")
                 if (pickup > 0) parts.add("Pickup ${String.format("%.1f", pickup)} kilometre")
                 if (drop > 0) parts.add("Drop ${String.format("%.1f", drop)} kilometre")
-                parts.joinToString(", ")
             }
             "te" -> {
-                val parts = mutableListOf<String>()
-                parts.add("$tag ride accept ayindi")
+                parts.add(if (isTest) "Namaskaram! Dr.Clicker voice test" else "$tag ride accept ayindi")
                 if (price > 0) parts.add("Price ${price.toInt()} rupayalu")
                 if (pickup > 0) parts.add("Pickup ${String.format("%.1f", pickup)} kilometres")
                 if (drop > 0) parts.add("Drop ${String.format("%.1f", drop)} kilometres")
-                parts.joinToString(", ")
             }
             "kn" -> {
-                val parts = mutableListOf<String>()
-                parts.add("$tag ride accept aaytu")
+                parts.add(if (isTest) "Namaskara! Dr.Clicker voice test" else "$tag ride accept aaytu")
                 if (price > 0) parts.add("Price ${price.toInt()} rupayigalu")
                 if (pickup > 0) parts.add("Pickup ${String.format("%.1f", pickup)} kilometres")
                 if (drop > 0) parts.add("Drop ${String.format("%.1f", drop)} kilometres")
-                parts.joinToString(", ")
             }
-            else -> { // English
-                val parts = mutableListOf<String>()
-                parts.add("$tag ride accepted")
+            else -> {
+                parts.add(if (isTest) "Hello! Dr.Clicker voice test" else "$tag ride accepted")
                 if (price > 0) parts.add("Price ${price.toInt()} rupees")
                 if (pickup > 0) parts.add("Pickup ${String.format("%.1f", pickup)} kilometres")
                 if (drop > 0) parts.add("Drop ${String.format("%.1f", drop)} kilometres")
-                parts.joinToString(", ")
             }
         }
-
-        handler.postDelayed({
-            try {
-                // Switch language if needed
-                val locale = when (lang) {
-                    "ta" -> Locale("ta", "IN")
-                    "te" -> Locale("te", "IN")
-                    "kn" -> Locale("kn", "IN")
-                    "hi" -> Locale("hi", "IN")
-                    else -> Locale.ENGLISH
-                }
-                tts?.setLanguage(locale)
-                tts?.speak(message, TextToSpeech.QUEUE_ADD, null, "ride_${System.currentTimeMillis()}")
-                log("🔊 Voice: $message")
-            } catch (e: Exception) {
-                log("⚠️ TTS error: ${e.message}")
-            }
-        }, 200L) // small delay after beep
-    }
-
-    /** Called from MainActivity to test voice */
-    fun testVoice(lang: String) {
-        if (!ttsReady) {
-            log("⚠️ TTS not ready")
-            return
-        }
-        val message = when (lang) {
-            "ta" -> "Vanakkam! Dr.Clicker voice test. Ride accept aayiduchu. Price 150 rupees. Pickup 2 kilometre. Drop 5 kilometre."
-            "hi" -> "Namaste! Dr.Clicker voice test. Ride accept ho gayi. Price 150 rupaye. Pickup 2 kilometre. Drop 5 kilometre."
-            "te" -> "Namaskaram! Dr.Clicker voice test. Ride accept ayindi. Price 150 rupayalu. Pickup 2 kilometres. Drop 5 kilometres."
-            "kn" -> "Namaskara! Dr.Clicker voice test. Ride accept aaytu. Price 150 rupayigalu. Pickup 2 kilometres. Drop 5 kilometres."
-            else -> "Hello! Dr.Clicker voice test. Ride accepted. Price 150 rupees. Pickup 2 kilometres. Drop 5 kilometres."
-        }
-        try {
-            val locale = when (lang) {
-                "ta" -> Locale("ta", "IN")
-                "te" -> Locale("te", "IN")
-                "kn" -> Locale("kn", "IN")
-                "hi" -> Locale("hi", "IN")
-                else -> Locale.ENGLISH
-            }
-            tts?.setLanguage(locale)
-            tts?.speak(message, TextToSpeech.QUEUE_FLUSH, null, "test_voice")
-        } catch (e: Exception) {
-            log("⚠️ Test voice error: ${e.message}")
-        }
-    }
-
-    // ────────────────────────────────────────────────────────────────
-    // GESTURE TAP
-    // ────────────────────────────────────────────────────────────────
-
-    private fun tap(x: Float, y: Float) {
-        val duration = ViewConfiguration.getTapTimeout().toLong().coerceAtLeast(40L)
-        val path = Path().apply {
-            moveTo(x, y)
-            lineTo(x, y + 1f)
-        }
-        val stroke = GestureDescription.StrokeDescription(path, 0L, duration)
-        val gesture = GestureDescription.Builder().addStroke(stroke).build()
-        dispatchGesture(gesture, object : GestureResultCallback() {
-            override fun onCancelled(gesture: GestureDescription) {
-                Log.w(TAG, "Gesture cancelled at ($x,$y)")
-            }
-        }, handler)
-    }
-
-    // ────────────────────────────────────────────────────────────────
-    // FOREGROUND NOTIFICATION
-    // ────────────────────────────────────────────────────────────────
-
-    private fun startForegroundService() {
-        val mgr = getSystemService(NotificationManager::class.java)
-        if (Build.VERSION.SDK_INT >= 26 && mgr.getNotificationChannel(CHANNEL_ID) == null) {
-            mgr.createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "Dr.Clicker Engine", NotificationManager.IMPORTANCE_LOW)
-                    .apply { setShowBadge(false) }
-            )
-        }
-
-        val pi = android.app.PendingIntent.getActivity(
-            this, 0,
-            Intent(this, MainActivity::class.java),
-            android.app.PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val notification = Notification.Builder(this, CHANNEL_ID)
-            .setContentTitle("⚡ Dr.Clicker v2.0")
-            .setContentText("Engine Active — Voice + History enabled")
-            .setSmallIcon(android.R.drawable.ic_media_play)
-            .setContentIntent(pi)
-            .setOngoing(true)
-            .build()
-
-        if (Build.VERSION.SDK_INT >= 34) {
-            startForeground(NOTIF_ID, notification,
-                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-        } else {
-            startForeground(NOTIF_ID, notification)
-        }
-    }
-
-    // ────────────────────────────────────────────────────────────────
-    // WAKELOCK
-    // ────────────────────────────────────────────────────────────────
-
-    private fun acquireWakeLock() {
-        try {
-            val pm = getSystemService(POWER_SERVICE) as PowerManager
-            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "DrClicker:WakeLock")
-            wakeLock?.acquire(WAKELOCK_MS)
-        } catch (e: Exception) {
-            Log.e(TAG, "WakeLock: ${e.message}")
-        }
-    }
-
-    private fun releaseWakeLock() {
-        try {
-            if (wakeLock?.isHeld == true) wakeLock?.release()
-        } catch (_: Exception) {}
+        return parts.joinToString(", ")
     }
 
     // ────────────────────────────────────────────────────────────────
     // HELPERS
     // ────────────────────────────────────────────────────────────────
 
-    private fun collectText(node: AccessibilityNodeInfo, fn: (String) -> Unit) {
+    /** Collect both text and numbers in a single tree walk (for blocklist + filters) */
+    private fun collectTextAndNumbers(node: AccessibilityNodeInfo,
+                                       texts: MutableList<String>, numbers: MutableList<Double>) {
         try {
-            node.text?.toString()?.takeIf { it.isNotBlank() }?.let(fn)
+            val t = node.text?.toString()?.trim() ?: ""
+            if (t.isNotEmpty()) {
+                texts.add(t)
+                val n = toNumber(t)
+                if (n > 0) numbers.add(n)
+            }
+            val d = node.contentDescription?.toString()?.trim() ?: ""
+            if (d.isNotEmpty()) texts.add(d)
         } catch (_: Exception) {}
         val n = try { node.childCount } catch (_: Exception) { 0 }
         for (i in 0 until n) {
             val child = try { node.getChild(i) } catch (_: Exception) { null } ?: continue
-            collectText(child, fn)
+            collectTextAndNumbers(child, texts, numbers)
             recycleNode(child)
         }
     }
@@ -697,20 +566,12 @@ class MyAccessibilityService : AccessibilityService(), TextToSpeech.OnInitListen
     private fun toNumber(text: String): Double {
         return try {
             val clean = STRIP_NON_NUM.matcher(text).replaceAll("")
-            if (clean.isNotEmpty() && NUMBER_RE.matcher(clean).matches()) {
-                clean.toDouble()
-            } else {
-                -1.0
-            }
-        } catch (_: Exception) {
-            -1.0
-        }
+            if (clean.isNotEmpty() && NUMBER_RE.matcher(clean).matches()) clean.toDouble() else -1.0
+        } catch (_: Exception) { -1.0 }
     }
 
     private fun recycleNode(node: AccessibilityNodeInfo) {
-        if (Build.VERSION.SDK_INT < 33) {
-            try { node.recycle() } catch (_: Exception) {}
-        }
+        if (Build.VERSION.SDK_INT < 33) try { node.recycle() } catch (_: Exception) {}
     }
 
     private fun beep() {
@@ -722,6 +583,37 @@ class MyAccessibilityService : AccessibilityService(), TextToSpeech.OnInitListen
                 handler.postDelayed({ tg.release() }, 200L)
             }, 150L)
         } catch (_: Exception) {}
+    }
+
+    private fun startForegroundService() {
+        val mgr = getSystemService(NotificationManager::class.java)
+        if (Build.VERSION.SDK_INT >= 26 && mgr.getNotificationChannel(CHANNEL_ID) == null) {
+            mgr.createNotificationChannel(
+                NotificationChannel(CHANNEL_ID, "Dr.Clicker Engine", NotificationManager.IMPORTANCE_LOW)
+                    .apply { setShowBadge(false) })
+        }
+        val pi = android.app.PendingIntent.getActivity(this, 0,
+            Intent(this, MainActivity::class.java), android.app.PendingIntent.FLAG_IMMUTABLE)
+        val notif = Notification.Builder(this, CHANNEL_ID)
+            .setContentTitle("⚡ Dr.Clicker v2.1")
+            .setContentText("Anti-Bot Engine Active")
+            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setContentIntent(pi).setOngoing(true).build()
+        if (Build.VERSION.SDK_INT >= 34)
+            startForeground(NOTIF_ID, notif, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        else startForeground(NOTIF_ID, notif)
+    }
+
+    private fun acquireWakeLock() {
+        try {
+            val pm = getSystemService(POWER_SERVICE) as PowerManager
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "DrClicker:WakeLock")
+            wakeLock?.acquire(WAKELOCK_MS)
+        } catch (_: Exception) {}
+    }
+
+    private fun releaseWakeLock() {
+        try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (_: Exception) {}
     }
 
     private fun log(msg: String) {

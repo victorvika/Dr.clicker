@@ -129,9 +129,7 @@ class MainActivity : FlutterActivity() {
                     // ── NEW: Clear all ride history ──
                     "clearHistory" -> {
                         getSharedPreferences("MeClickerPrefs", MODE_PRIVATE)
-                            .edit()
-                            .remove("ride_history")
-                            .apply()
+                            .edit().remove("ride_history").apply()
                         result.success(null)
                     }
 
@@ -139,7 +137,6 @@ class MainActivity : FlutterActivity() {
                     "testVoice" -> {
                         val lang = call.argument<String>("lang") ?: "en"
                         result.success(null)
-                        // Use late-init pattern to avoid self-reference
                         val ttsHolder = arrayOf<android.speech.tts.TextToSpeech?>(null)
                         ttsHolder[0] = android.speech.tts.TextToSpeech(this,
                             android.speech.tts.TextToSpeech.OnInitListener { status ->
@@ -154,11 +151,11 @@ class MainActivity : FlutterActivity() {
                                     ttsHolder[0]?.setLanguage(locale)
                                     ttsHolder[0]?.setSpeechRate(1.1f)
                                     val message = when (lang) {
-                                        "ta" -> "Vanakkam! Dr.Clicker voice test. Ride accept aayiduchu. Price 150 rupees."
+                                        "ta" -> "Vanakkam! Dr.Clicker voice test. Ride accept aayiduchu. Price 150 rupees. Pickup 2 kilometre."
                                         "hi" -> "Namaste! Dr.Clicker voice test. Ride accept ho gayi. Price 150 rupaye."
                                         "te" -> "Namaskaram! Dr.Clicker voice test. Ride accept ayindi. Price 150 rupayalu."
                                         "kn" -> "Namaskara! Dr.Clicker voice test. Ride accept aaytu. Price 150 rupayigalu."
-                                        else -> "Hello! Dr.Clicker voice test. Ride accepted. Price 150 rupees."
+                                        else -> "Hello! Dr.Clicker voice test. Ride accepted. Price 150 rupees. Pickup 2 kilometres."
                                     }
                                     ttsHolder[0]?.speak(message, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "test")
                                     android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
