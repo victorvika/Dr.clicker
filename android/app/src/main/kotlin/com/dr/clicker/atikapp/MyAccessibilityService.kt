@@ -221,7 +221,11 @@ class MyAccessibilityService : AccessibilityService(), TextToSpeech.OnInitListen
         }
 
         // Gaussian jitter — more natural than uniform random
-        val jitter = (Random.nextGaussian() * base * 0.25).toLong()
+        // Using Box-Muller transform since kotlin.random.Random doesn't have nextGaussian()
+        val u1 = Random.nextDouble(0.0001, 1.0)
+        val u2 = Random.nextDouble(0.0001, 1.0)
+        val gaussian = kotlin.math.sqrt(-2.0 * kotlin.math.ln(u1)) * kotlin.math.cos(2.0 * kotlin.math.PI * u2)
+        val jitter = (gaussian * base * 0.25).toLong()
         val microHesitation = if (Random.nextInt(100) < 15) Random.nextLong(50L, 200L) else 0L
 
         return (base + jitter + microHesitation).coerceAtLeast(10L)
