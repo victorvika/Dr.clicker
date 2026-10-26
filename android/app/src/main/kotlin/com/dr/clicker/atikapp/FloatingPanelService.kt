@@ -85,7 +85,7 @@ class FloatingPanelService : Service() {
         val pi = PendingIntent.getActivity(this, 0,
             Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         val notif = Notification.Builder(this, CHANNEL_ID)
-            .setContentTitle("⚡ Dr.Clicker Panel Active")
+            .setContentTitle("⚡ Dr.Clicker v2.0 Panel")
             .setContentText("Floating panel is running on screen")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentIntent(pi)
@@ -237,15 +237,29 @@ class FloatingPanelService : Service() {
         val flPrefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE)
         val minP = flPrefs.getInt("min_price", 0)
         val maxP = flPrefs.getInt("max_price", 0)
+        val priceOn = flPrefs.getBoolean("price_filter_on", false)
+        val distOn = flPrefs.getBoolean("dist_filter_on", false)
+        val voiceOn = flPrefs.getBoolean("voice_on", true)
+        val clickSpeed = flPrefs.getFloat("click_speed_ms", 50f).toInt()
 
-        tvStatus?.text = if (engineOn) "Engine: ON 🟢" else "Engine: OFF 🔴"
+        tvStatus?.text = if (engineOn) "Engine: ON 🟢 • ${clickSpeed}ms" else "Engine: OFF 🔴"
         tvStatus?.setTextColor(if (engineOn) Color.parseColor("#00E676") else Color.parseColor("#EF5350"))
-        tvCount?.text = "Rides: $count"
+        tvCount?.text = "Rides: $count ${if (voiceOn) "🔊" else "🔇"}"
         tvFilter?.text = when {
-            minP > 0 && maxP > 0 -> "₹$minP–₹$maxP"
-            minP > 0 -> "₹$minP+"
-            maxP > 0 -> "< ₹$maxP"
-            else -> "Filter: All ✓"
+            priceOn && distOn -> when {
+                minP > 0 && maxP > 0 -> "₹$minP–₹$maxP + Dist"
+                minP > 0 -> "₹$minP+ + Dist"
+                maxP > 0 -> "< ₹$maxP + Dist"
+                else -> "Price + Dist ✓"
+            }
+            priceOn -> when {
+                minP > 0 && maxP > 0 -> "₹$minP–₹$maxP"
+                minP > 0 -> "₹$minP+"
+                maxP > 0 -> "< ₹$maxP"
+                else -> "Price ✓"
+            }
+            distOn -> "Distance ✓"
+            else -> "All rides ✓"
         }
     }
 }

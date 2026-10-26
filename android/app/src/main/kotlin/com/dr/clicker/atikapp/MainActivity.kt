@@ -119,6 +119,60 @@ class MainActivity : FlutterActivity() {
                         result.success(MyAccessibilityService.isEngineOn)
                     }
 
+                    // ── NEW: Get ride history as JSON string ──
+                    "getHistory" -> {
+                        val prefs = getSharedPreferences("MeClickerPrefs", MODE_PRIVATE)
+                        val history = prefs.getString("ride_history", null)
+                        result.success(history ?: "[]")
+                    }
+
+                    // ── NEW: Clear all ride history ──
+                    "clearHistory" -> {
+                        getSharedPreferences("MeClickerPrefs", MODE_PRIVATE)
+                            .edit()
+                            .remove("ride_history")
+                            .apply()
+                        // Also clear in-memory history
+                        val service = MyAccessibilityService()
+                        try { service.clearHistory() } catch (_: Exception) {}
+                        result.success(null)
+                    }
+
+                    // ── NEW: Test voice announcement ──
+                    "testVoice" -> {
+                        val lang = call.argument<String>("lang") ?: "en"
+                        // We can't call the service directly from here safely,
+                        // so we use TTS directly for test
+                        val tts = android.speech.tts.TextToSpeech(this,
+                            android.speech.tts.TextToSpeech.OnInitListener { status ->
+                                if (status == android.speech.tts.TextToSpeech.SUCCESS) {
+                                    val locale = when (lang) {
+                                        "ta" -> Locale("ta", "IN")
+                                        "te" -> Locale("te", "IN")
+                                        "kn" -> Locale("kn", "IN")
+                                        "hi" -> Locale("hi", "IN")
+                                        else -> Locale.ENGLISH
+                                    }
+                                    tts?.setLanguage(locale)
+                                    tts?.setSpeechRate(1.1f)
+                                    val message = when (lang) {
+                                        "ta" -> "Vanakkam! Dr.Clicker voice test. Ride accept aayiduchu. Price 150 rupees."
+                                        "hi" -> "Namaste! Dr.Clicker voice test. Ride accept ho gayi. Price 150 rupaye."
+                                        "te" -> "Namaskaram! Dr.Clicker voice test. Ride accept ayindi. Price 150 rupayalu."
+                                        "kn" -> "Namaskara! Dr.Clicker voice test. Ride accept aaytu. Price 150 rupayigalu."
+                                        else -> "Hello! Dr.Clicker voice test. Ride accepted. Price 150 rupees."
+                                    }
+                                    tts?.speak(message, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "test")
+                                    // Shutdown after speaking
+                                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                                        tts?.stop()
+                                        tts?.shutdown()
+                                    }, 5000L)
+                                }
+                            })
+                        result.success(null)
+                    }
+
                     "getLogPath" -> {
                         val logFile = File(getExternalFilesDir(null), "god_mode_logs.txt")
                         if (!logFile.exists()) {
